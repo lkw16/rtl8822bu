@@ -39,6 +39,7 @@
 
 #ifdef PLATFORM_LINUX
 	#include <osdep_service_linux.h>
+	#include <linux/sched/signal.h>
 #endif
 
 #ifdef PLATFORM_OS_XP

@@ -733,6 +733,10 @@ void rtw_cfg80211_indicate_connect(_adapter *padapter) {
 	}
 
 check_bss:
+	/* The function `cfg80211_roamed()` and `cfg80211_roamed_bss()` were unified by commit [29ce6ec].
+	 * See https://github.com/torvalds/linux/commit/29ce6ecbb83c9185d76e3a7c340c9702d2a54961#diff-6788d961d43074bcd7966d231861f6b8
+	 */
+
 	if (!rtw_cfg80211_check_bss(padapter))
 		RTW_PRINT(FUNC_ADPT_FMT" BSS not found !!\n", FUNC_ADPT_ARG(padapter));
 
@@ -747,17 +751,32 @@ check_bss:
 		notify_channel = ieee80211_get_channel(wiphy, freq);
 #endif
 
+#if KERNEL_VERSION(4, 12, 0) <= LINUX_VERSION_CODE
+		struct cfg80211_roam_info roam_info;
+		memset(&roam_info, 0, sizeof(struct cfg80211_roam_info));
+		roam_info.channel     = notify_channel;
+		roam_info.bssid       = cur_network->network.MacAddress;
+		roam_info.req_ie      = pmlmepriv->assoc_req     + sizeof(struct rtw_ieee80211_hdr_3addr) + 2;
+		roam_info.req_ie_len  = pmlmepriv->assoc_req_len - sizeof(struct rtw_ieee80211_hdr_3addr) - 2;
+		roam_info.resp_ie     = pmlmepriv->assoc_rsp     + sizeof(struct rtw_ieee80211_hdr_3addr) + 6;
+		roam_info.resp_ie_len = pmlmepriv->assoc_rsp_len - sizeof(struct rtw_ieee80211_hdr_3addr) - 6;
+#endif
+
 		RTW_INFO(FUNC_ADPT_FMT" call cfg80211_roamed\n", FUNC_ADPT_ARG(padapter));
 		cfg80211_roamed(padapter->pnetdev
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 39) || defined(COMPAT_KERNEL_RELEASE)
+#if (KERNEL_VERSION(2, 6, 39) < LINUX_VERSION_CODE && LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)) || defined(COMPAT_KERNEL_RELEASE)
 		                , notify_channel
-#endif
+#elif KERNEL_VERSION(4, 12, 0) <= LINUX_VERSION_CODE
+		                , &roam_info
+		                , GFP_ATOMIC);
+#else
 		                , cur_network->network.MacAddress
 		                , pmlmepriv->assoc_req + sizeof(struct rtw_ieee80211_hdr_3addr) + 2
 		                , pmlmepriv->assoc_req_len - sizeof(struct rtw_ieee80211_hdr_3addr) - 2
 		                , pmlmepriv->assoc_rsp + sizeof(struct rtw_ieee80211_hdr_3addr) + 6
 		                , pmlmepriv->assoc_rsp_len - sizeof(struct rtw_ieee80211_hdr_3addr) - 6
 		                , GFP_ATOMIC);
+#endif
 	} else {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 11, 0) || defined(COMPAT_KERNEL_RELEASE)
 		RTW_INFO("pwdev->sme_state(b)=%d\n", pwdev->sme_state);
@@ -1719,9 +1738,13 @@ enum nl80211_iftype {
 	NL80211_IFTYPE_MAX = NUM_NL80211_IFTYPES - 1
 };
 #endif
+
 static int cfg80211_rtw_change_iface(struct wiphy *wiphy,
                                      struct net_device *ndev,
-                                     enum nl80211_iftype type, u32 *flags,
+                                     enum nl80211_iftype type,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+                                     u32 *flags,
+#endif
                                      struct vif_params *params) {
 	enum nl80211_iftype old_type;
 	NDIS_802_11_NETWORK_INFRASTRUCTURE networkType;
@@ -3595,7 +3618,15 @@ static int rtw_cfg80211_add_monitor_if(_adapter *padapter, char *name, struct ne
 	mon_ndev->type = ARPHRD_IEEE80211_RADIOTAP;
 	strncpy(mon_ndev->name, name, IFNAMSIZ);
 	mon_ndev->name[IFNAMSIZ - 1] = 0;
+#if KERNEL_VERSION(4, 12, 0) < LINUX_VERSION_CODE
+	/* struct `net_device` was changed by commit [cf124db5] in Linux kernel.
+	 * See https://github.com/torvalds/linux/commit/cf124db566e6b036b8bcbe8decbed740bdfac8c6
+	 */
+	mon_ndev->needs_free_netdev = false;
+	mon_ndev->priv_destructor   = rtw_ndev_destructor;
+#elif
 	mon_ndev->destructor = rtw_ndev_destructor;
+#endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29))
 	mon_ndev->netdev_ops = &rtw_cfg80211_monitor_if_ops;
@@ -3661,7 +3692,11 @@ cfg80211_rtw_add_virtual_intf(
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0))
     unsigned char name_assign_type,
 #endif
-    enum nl80211_iftype type, u32 *flags, struct vif_params *params) {
+    enum nl80211_iftype type,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+    u32 *flags,
+#endif
+    struct vif_params *params) {
 	int ret = 0;
 	struct net_device *ndev = NULL;
 	_adapter *padapter = wiphy_to_adapter(wiphy);
@@ -6093,7 +6128,10 @@ static void rtw_cfg80211_preinit_wiphy(_adapter *adapter, struct wiphy *wiphy) {
 	/* wiphy->flags |= WIPHY_FLAG_OFFCHAN_TX | WIPHY_FLAG_HAVE_AP_SME; */
 #endif
 
-#if defined(CONFIG_PM) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
+#if defined(CONFIG_PM) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0))
+	/* Later kernel 4.12, concurrently multiple scheduled scan is default.
+	 * See https://github.com/torvalds/linux/commit/ca986ad9bcd3893c8b0b4cc2cafcc8cf1554409c
+	 */
 	wiphy->flags |= WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
 #ifdef CONFIG_PNO_SUPPORT
 	wiphy->max_sched_scan_ssids = MAX_PNO_LIST_COUNT;
@@ -6126,6 +6164,9 @@ static void rtw_cfg80211_preinit_wiphy(_adapter *adapter, struct wiphy *wiphy) {
 #endif
 }
 
+/* Member `(*change_virtual_intf)()` and `(*add_virtual_intf)()` were changed by Linux kernel [818a986e4ebacea2020622e48c8bc04b7f500d89].
+ * See https://github.com/torvalds/linux/commit/818a986e4ebacea2020622e48c8bc04b7f500d89
+ */
 static struct cfg80211_ops rtw_cfg80211_ops = {
 	.change_virtual_intf = cfg80211_rtw_change_iface,
 	.add_key = cfg80211_rtw_add_key,

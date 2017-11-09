@@ -877,7 +877,7 @@ _IQK_IQKbyPath_8822B(
 		else
 #endif
 			pDM_Odm->RFCalibrateInfo.IQKstep++;
-			break;	
+		break;
 	case 6:		/*S1 RXIQK*/
 #if 1
 		_IQK_RXKSetting_8822B(pDM_Odm, ODM_RF_PATH_B);

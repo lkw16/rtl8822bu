@@ -13,8 +13,7 @@ A few known wireless cards that use this driver include
 > sorry people with older kernels, the code is removed.
 > Upon request I can work towards making it backwards compatible.
 
-Currently tested on X86_64 and ARM platform(s) **only**,  
-cross compile possible.
+Currently tested with Linux kernel 4.13.10 on X86_64 platform **only**.
 
 For compiling type  
 `make`  
@@ -37,7 +36,7 @@ This driver allows use of wpa_supplicant by using the nl80211 driver
 If installing on Rasberry Pi or other "armv71" devices, edit the Makefile and set `CONFIG_PLATFORM_ARM_RPI = y` and `CONFIG_PLATFORM_I386_PC = n`
 
 **STATUS**  
-Driver works fine (some sort of)  
+Driver basically works.
 Most of the work is done is cleaning the driver and make this mess **readable**   for conversion.
 Updates for wireless-ext/cfg80211  are not accepted.  
 
